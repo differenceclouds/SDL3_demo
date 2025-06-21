@@ -1,0 +1,48 @@
+{
+	"folders":
+	[
+		{
+			"path": ".",
+		},
+		{
+			"path": "~/Odin/core",
+		},
+		{
+			"path": "~/Odin/vendor/raylib",
+		},
+	],
+	"build_systems":
+	[
+		{
+			"name": "odin_run",
+			"shell_cmd": "~/Odin/odin run . -debug",
+			"file_regex": "^(.+)\\(([0-9]+):([0-9]+)\\) (.+)$"
+		},
+		{
+			"name": "odin_build_run",
+			"shell_cmd": "~/Odin/odin run . -keep-executable -debug",
+			"file_regex": "^(.+)\\(([0-9]+):([0-9]+)\\) (.+)$"
+		},
+		{
+			"name": "odin_run_win",
+			"cmd": "odin run .",
+			"file_regex": "^(.+)\\(([0-9]+):([0-9]+)\\) (.+)$"
+		}
+	],
+	"settings":
+	{
+		// "auto_complete": false,
+		"LSP":
+		{
+			"odin":
+			{
+				"enabled": true,
+			},
+		},
+	},
+}
+
+
+
+
+

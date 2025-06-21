@@ -81,6 +81,7 @@ main :: proc() {
 		sdl.EndGPURenderPass(render_pass)
 
 		// more render passes
+		
 		ok = sdl.SubmitGPUCommandBuffer(cmd_buf); assert(ok)
 	}
 }

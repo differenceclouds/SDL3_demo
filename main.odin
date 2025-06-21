@@ -67,21 +67,25 @@ main :: proc() {
 		swapchain_tex : ^sdl.GPUTexture
 		ok = sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buf, window, &swapchain_tex, nil, nil); assert(ok)
 
-		color_target := sdl.GPUColorTargetInfo {
-			texture = swapchain_tex,
-			load_op = .CLEAR,
-			clear_color = {0, 0.2, 0.4, 1},
-			store_op = .STORE,
+		if swapchain_tex != nil { //Seems to always be rendering on mac
+			color_target := sdl.GPUColorTargetInfo {
+				texture = swapchain_tex,
+				load_op = .CLEAR,
+				clear_color = {0, 0.2, 0.4, 1},
+				store_op = .STORE,
 
+			}
+			render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
+			sdl.BindGPUGraphicsPipeline(render_pass, pipeline)
+			sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
+
+			sdl.EndGPURenderPass(render_pass)
+		} else {
+			
 		}
-		render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
-		sdl.BindGPUGraphicsPipeline(render_pass, pipeline)
-		sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
-
-		sdl.EndGPURenderPass(render_pass)
 
 		// more render passes
-		
+
 		ok = sdl.SubmitGPUCommandBuffer(cmd_buf); assert(ok)
 	}
 }

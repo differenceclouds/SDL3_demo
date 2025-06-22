@@ -8,7 +8,14 @@ default_context: runtime.Context
 
 frag_shader_code := #load("shader_frag.metal")
 vert_shader_code := #load("shader_vert.metal")
+// frag_shader_code := #load("shader.glsl.frag")
+// vert_shader_code := #load("shader.glsl.vert")
 
+Device :: struct {
+	gpu: ^sdl.GPUDevice,
+	window: ^sdl.Window,
+	pipeline: ^sdl.GPUGraphicsPipeline
+}
 
 main :: proc() {
 	context.logger = log.create_console_logger()
@@ -24,29 +31,39 @@ main :: proc() {
 
 	ok = sdl.Init({.VIDEO}); assert(ok)
 
-	window := sdl.CreateWindow("Hello SDL3", 1280, 720, {}); assert(window != nil)
+	device : Device
 
-	gpu := sdl.CreateGPUDevice({.MSL}, true, nil)
+	device.window = sdl.CreateWindow("Hello SDL3", 1280, 720, {.RESIZABLE}); assert(device.window != nil)
+	device.gpu = sdl.CreateGPUDevice({.MSL}, true, nil)
 
-	ok = sdl.ClaimWindowForGPUDevice(gpu, window); assert(ok)
+	ok = sdl.ClaimWindowForGPUDevice(device.gpu, device.window); assert(ok)
 
-	vert_shader := load_shader(gpu, vert_shader_code, .VERTEX)
-	frag_shader := load_shader(gpu, frag_shader_code, .FRAGMENT)
+	vert_shader := load_shader(device.gpu, vert_shader_code, .VERTEX)
+	frag_shader := load_shader(device.gpu, frag_shader_code, .FRAGMENT)
 
-	pipeline := sdl.CreateGPUGraphicsPipeline(gpu, {
+	device.pipeline = sdl.CreateGPUGraphicsPipeline(device.gpu, {
 		vertex_shader = vert_shader,
 		fragment_shader = frag_shader,
 		primitive_type = .TRIANGLELIST,
 		target_info = {
 			num_color_targets = 1,
 			color_target_descriptions = &(sdl.GPUColorTargetDescription {
-				format = sdl.GetGPUSwapchainTextureFormat(gpu, window)
+				format = sdl.GetGPUSwapchainTextureFormat(device.gpu, device.window)
 			})
 		}
 	})
 
-	sdl.ReleaseGPUShader(gpu, vert_shader)
-	sdl.ReleaseGPUShader(gpu, frag_shader)
+	sdl.ReleaseGPUShader(device.gpu, vert_shader)
+	sdl.ReleaseGPUShader(device.gpu, frag_shader)
+
+	ok = sdl.AddEventWatch(proc "c" (userdata: rawptr, event: ^sdl.Event) -> bool {
+		if event.type == .WINDOW_EXPOSED {
+			context = default_context
+			device := cast(^Device)userdata
+			draw(device)
+		}
+		return true
+	}, &device); assert(ok)
 
 	main_loop: for {
 		ev: sdl.Event
@@ -58,35 +75,7 @@ main :: proc() {
 					if ev.key.scancode == .ESCAPE do break main_loop
 			}
 		}
-
-		// update game state
-
-		// render
-		cmd_buf := sdl.AcquireGPUCommandBuffer(gpu)
-		
-		swapchain_tex : ^sdl.GPUTexture
-		ok = sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buf, window, &swapchain_tex, nil, nil); assert(ok)
-
-		if swapchain_tex != nil { //Seems to always be rendering on mac
-			color_target := sdl.GPUColorTargetInfo {
-				texture = swapchain_tex,
-				load_op = .CLEAR,
-				clear_color = {0, 0.2, 0.4, 1},
-				store_op = .STORE,
-
-			}
-			render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
-			sdl.BindGPUGraphicsPipeline(render_pass, pipeline)
-			sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
-
-			sdl.EndGPURenderPass(render_pass)
-		} else {
-			
-		}
-
-		// more render passes
-
-		ok = sdl.SubmitGPUCommandBuffer(cmd_buf); assert(ok)
+		draw(&device)
 	}
 }
 
@@ -103,4 +92,24 @@ load_shader :: proc(device: ^sdl.GPUDevice, code: []u8, stage: sdl.GPUShaderStag
 		format = {.MSL},
 		stage = stage
 	})
+}
+
+draw :: proc(device: ^Device) {
+	using device
+	cmd_buf := sdl.AcquireGPUCommandBuffer(gpu)
+	swapchain_tex : ^sdl.GPUTexture
+	ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buf, window, &swapchain_tex, nil, nil); assert(ok)
+	if swapchain_tex != nil {
+		color_target := sdl.GPUColorTargetInfo {
+			texture = swapchain_tex,
+			load_op = .CLEAR,
+			clear_color = {0, 0.2, 0.4, 1},
+			store_op = .STORE,
+		}
+		render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
+		sdl.BindGPUGraphicsPipeline(render_pass, pipeline)
+		sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
+		sdl.EndGPURenderPass(render_pass)
+		ok = sdl.SubmitGPUCommandBuffer(cmd_buf); assert(ok)
+	}
 }

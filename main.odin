@@ -11,7 +11,7 @@ vert_shader_code := #load("shader_vert.metal")
 // frag_shader_code := #load("shader.glsl.frag")
 // vert_shader_code := #load("shader.glsl.vert")
 
-Device :: struct {
+SDL_Device :: struct {
 	gpu: ^sdl.GPUDevice,
 	window: ^sdl.Window,
 	pipeline: ^sdl.GPUGraphicsPipeline
@@ -31,15 +31,16 @@ main :: proc() {
 
 	ok = sdl.Init({.VIDEO}); assert(ok)
 
-	device : Device
+	device : SDL_Device
+	shader_format: sdl.GPUShaderFormat = {.MSL}
 
 	device.window = sdl.CreateWindow("Hello SDL3", 1280, 720, {.RESIZABLE}); assert(device.window != nil)
-	device.gpu = sdl.CreateGPUDevice({.MSL}, true, nil)
+	device.gpu = sdl.CreateGPUDevice(shader_format, true, nil)
 
 	ok = sdl.ClaimWindowForGPUDevice(device.gpu, device.window); assert(ok)
 
-	vert_shader := load_shader(device.gpu, vert_shader_code, .VERTEX)
-	frag_shader := load_shader(device.gpu, frag_shader_code, .FRAGMENT)
+	vert_shader := load_shader(device.gpu, shader_format, vert_shader_code, .VERTEX)
+	frag_shader := load_shader(device.gpu, shader_format, frag_shader_code, .FRAGMENT)
 
 	device.pipeline = sdl.CreateGPUGraphicsPipeline(device.gpu, {
 		vertex_shader = vert_shader,
@@ -56,10 +57,11 @@ main :: proc() {
 	sdl.ReleaseGPUShader(device.gpu, vert_shader)
 	sdl.ReleaseGPUShader(device.gpu, frag_shader)
 
+	//Do draw calls continuously if the window is being resized
 	ok = sdl.AddEventWatch(proc "c" (userdata: rawptr, event: ^sdl.Event) -> bool {
 		if event.type == .WINDOW_EXPOSED {
 			context = default_context
-			device := cast(^Device)userdata
+			device := cast(^SDL_Device)userdata
 			draw(device)
 		}
 		return true
@@ -79,26 +81,27 @@ main :: proc() {
 	}
 }
 
-load_shader :: proc(device: ^sdl.GPUDevice, code: []u8, stage: sdl.GPUShaderStage) -> ^sdl.GPUShader {
-	entrypoint_string: cstring
-	switch stage {
-		case .FRAGMENT: entrypoint_string = "fragment_main"
-		case .VERTEX: entrypoint_string = "vertex_main"
+load_shader :: proc(device: ^sdl.GPUDevice, shader_format: sdl.GPUShaderFormat, code: []u8, stage: sdl.GPUShaderStage) -> ^sdl.GPUShader {
+	entrypoint_string: cstring = "main"
+	if shader_format == {.MSL} {
+		switch stage {
+			case .FRAGMENT: entrypoint_string = "fragment_main"
+			case .VERTEX: entrypoint_string = "vertex_main"
+		}
 	}
 	return sdl.CreateGPUShader(device, {
 		code_size = len(code),
 		code = raw_data(code),
 		entrypoint = entrypoint_string,
-		format = {.MSL},
+		format = shader_format,
 		stage = stage
 	})
 }
 
-draw :: proc(device: ^Device) {
-	using device
-	cmd_buf := sdl.AcquireGPUCommandBuffer(gpu)
+draw :: proc(device: ^SDL_Device) {
+	cmd_buf := sdl.AcquireGPUCommandBuffer(device.gpu)
 	swapchain_tex : ^sdl.GPUTexture
-	ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buf, window, &swapchain_tex, nil, nil); assert(ok)
+	ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buf, device.window, &swapchain_tex, nil, nil); assert(ok)
 	if swapchain_tex != nil {
 		color_target := sdl.GPUColorTargetInfo {
 			texture = swapchain_tex,
@@ -107,7 +110,7 @@ draw :: proc(device: ^Device) {
 			store_op = .STORE,
 		}
 		render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
-		sdl.BindGPUGraphicsPipeline(render_pass, pipeline)
+		sdl.BindGPUGraphicsPipeline(render_pass, device.pipeline)
 		sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
 		sdl.EndGPURenderPass(render_pass)
 		ok = sdl.SubmitGPUCommandBuffer(cmd_buf); assert(ok)

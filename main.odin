@@ -2,19 +2,25 @@ package main
 
 import "base:runtime"
 import "core:log"
+import "core:math/linalg"
 import sdl "vendor:sdl3"
 
 default_context: runtime.Context
 
 frag_shader_code := #load("shader_frag.metal")
 vert_shader_code := #load("shader_vert.metal")
-// frag_shader_code := #load("shader.glsl.frag")
-// vert_shader_code := #load("shader.glsl.vert")
+// frag_shader_code := #load("shader.spv.frag")
+// vert_shader_code := #load("shader.spv.vert")
 
-SDL_Device :: struct {
+SDL_Data :: struct {
 	gpu: ^sdl.GPUDevice,
 	window: ^sdl.Window,
-	pipeline: ^sdl.GPUGraphicsPipeline
+	pipeline: ^sdl.GPUGraphicsPipeline,
+	ubo: UBO
+}
+
+UBO :: struct {
+	proj: matrix[4,4]f32
 }
 
 main :: proc() {
@@ -31,7 +37,7 @@ main :: proc() {
 
 	ok = sdl.Init({.VIDEO}); assert(ok)
 
-	device : SDL_Device
+	device : SDL_Data
 	shader_format: sdl.GPUShaderFormat = {.MSL}
 
 	device.window = sdl.CreateWindow("Hello SDL3", 1280, 720, {.RESIZABLE}); assert(device.window != nil)
@@ -39,8 +45,10 @@ main :: proc() {
 
 	ok = sdl.ClaimWindowForGPUDevice(device.gpu, device.window); assert(ok)
 
-	vert_shader := load_shader(device.gpu, shader_format, vert_shader_code, .VERTEX)
-	frag_shader := load_shader(device.gpu, shader_format, frag_shader_code, .FRAGMENT)
+	vert_shader := load_shader(device.gpu, shader_format, vert_shader_code, .VERTEX, 1)
+	frag_shader := load_shader(device.gpu, shader_format, frag_shader_code, .FRAGMENT, 0)
+
+	// window2 := sdl.CreateWindow("AUXILIARY WINDOW", 300, 300, {.RESIZABLE})
 
 	device.pipeline = sdl.CreateGPUGraphicsPipeline(device.gpu, {
 		vertex_shader = vert_shader,
@@ -61,11 +69,16 @@ main :: proc() {
 	ok = sdl.AddEventWatch(proc "c" (userdata: rawptr, event: ^sdl.Event) -> bool {
 		if event.type == .WINDOW_EXPOSED {
 			context = default_context
-			device := cast(^SDL_Device)userdata
+			device := cast(^SDL_Data)userdata
 			draw(device)
 		}
 		return true
 	}, &device); assert(ok)
+
+	win_size : [2]i32
+	ok = sdl.GetWindowSize(device.window, &win_size.x, &win_size.y); assert(ok)
+	aspect := f32(win_size.x) / f32(win_size.y)
+	device.ubo.proj = linalg.matrix4_perspective_f32(70, aspect, 0.0001, 1000)
 
 	main_loop: for {
 		ev: sdl.Event
@@ -81,7 +94,7 @@ main :: proc() {
 	}
 }
 
-load_shader :: proc(device: ^sdl.GPUDevice, shader_format: sdl.GPUShaderFormat, code: []u8, stage: sdl.GPUShaderStage) -> ^sdl.GPUShader {
+load_shader :: proc(device: ^sdl.GPUDevice, shader_format: sdl.GPUShaderFormat, code: []u8, stage: sdl.GPUShaderStage, num_uniform_buffers:u32) -> ^sdl.GPUShader {
 	entrypoint_string: cstring = "main"
 	if shader_format == {.MSL} {
 		switch stage {
@@ -94,14 +107,18 @@ load_shader :: proc(device: ^sdl.GPUDevice, shader_format: sdl.GPUShaderFormat, 
 		code = raw_data(code),
 		entrypoint = entrypoint_string,
 		format = shader_format,
-		stage = stage
+		stage = stage,
+		num_uniform_buffers = num_uniform_buffers,
 	})
 }
 
-draw :: proc(device: ^SDL_Device) {
+draw :: proc(device: ^SDL_Data) {
 	cmd_buf := sdl.AcquireGPUCommandBuffer(device.gpu)
 	swapchain_tex : ^sdl.GPUTexture
 	ok := sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buf, device.window, &swapchain_tex, nil, nil); assert(ok)
+
+	ubo := device.ubo.proj
+
 	if swapchain_tex != nil {
 		color_target := sdl.GPUColorTargetInfo {
 			texture = swapchain_tex,
@@ -111,6 +128,9 @@ draw :: proc(device: ^SDL_Device) {
 		}
 		render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
 		sdl.BindGPUGraphicsPipeline(render_pass, device.pipeline)
+
+		sdl.PushGPUVertexUniformData(cmd_buf, 0, &ubo, size_of(ubo))
+
 		sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
 		sdl.EndGPURenderPass(render_pass)
 		ok = sdl.SubmitGPUCommandBuffer(cmd_buf); assert(ok)
